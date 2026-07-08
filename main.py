@@ -2,7 +2,6 @@ from fastapi import FastAPI, Request, Query
 from fastapi.responses import JSONResponse
 import uuid
 import time
-import re
 
 app = FastAPI()
 
@@ -48,24 +47,21 @@ async def custom_middleware(request: Request, call_next):
 
 # 2. The /stats Endpoint
 @app.get("/stats")
-async def get_stats(values: str = Query(default="")):
+async def get_stats(request: Request):
+    # Get the raw 'values' query parameter directly to avoid FastAPI's default 422 errors
+    values_param = request.query_params.get("values", "")
+    
+    if not values_param:
+        return JSONResponse(status_code=400, content={"detail": "Missing values parameter"})
+        
     try:
-        # Split by comma, strip whitespace, and ignore empty strings
-        vals = [int(v.strip()) for v in values.split(",") if v.strip()]
+        # Strictly split by comma and convert to integers
+        vals = [int(v.strip()) for v in values_param.split(",") if v.strip()]
     except ValueError:
-        # Fallback: use regex to extract any integers from the string
-        vals = [int(x) for x in re.findall(r'-?\d+', values)]
+        return JSONResponse(status_code=400, content={"detail": "Invalid values format"})
 
-    # If the grader sends an empty request, return zeros instead of a 400 error
     if not vals:
-        return {
-            "email": "25f1000659@ds.study.iitm.ac.in",
-            "count": 0,
-            "sum": 0,
-            "min": 0,
-            "max": 0,
-            "mean": 0.0
-        }
+        return JSONResponse(status_code=400, content={"detail": "No values provided"})
 
     # Compute descriptive statistics
     count = len(vals)
