@@ -1,5 +1,4 @@
 from fastapi import FastAPI, Request, Query
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uuid
 import time
@@ -7,30 +6,47 @@ import re
 
 app = FastAPI()
 
-# 1. Custom Middleware to inject X-Request-ID and X-Process-Time
+ALLOWED_ORIGIN = "https://dash-irxkv0.example.com"
+
+# 1. Custom Middleware for Headers AND Strict CORS
 @app.middleware("http")
-async def add_custom_headers(request: Request, call_next):
+async def custom_middleware(request: Request, call_next):
     request_id = str(uuid.uuid4())
     start_time = time.time()
     
+    origin = request.headers.get("origin")
+    
+    # --- PREFLIGHT (OPTIONS) HANDLING ---
+    if request.method == "OPTIONS":
+        if origin == ALLOWED_ORIGIN:
+            # Allowed origin: succeed and return ACAO header
+            response = JSONResponse(content={"ok": True}, status_code=200)
+            response.headers["Access-Control-Allow-Origin"] = ALLOWED_ORIGIN
+            response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "*"
+        else:
+            # Evil origin: reject preflight (no ACAO header)
+            response = JSONResponse(content={"error": "Disallowed origin"}, status_code=403)
+            
+        process_time = time.time() - start_time
+        response.headers["X-Request-ID"] = request_id
+        response.headers["X-Process-Time"] = f"{process_time:.6f}"
+        return response
+
+    # --- NORMAL REQUEST (GET) HANDLING ---
     response = await call_next(request)
     
+    # Only add the CORS header if the request is from the allowed origin
+    if origin == ALLOWED_ORIGIN:
+        response.headers["Access-Control-Allow-Origin"] = ALLOWED_ORIGIN
+        
     process_time = time.time() - start_time
     response.headers["X-Request-ID"] = request_id
     response.headers["X-Process-Time"] = f"{process_time:.6f}"
     
     return response
 
-# 2. Strict CORS Policy
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["https://dash-irxkv0.example.com"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# 3. The /stats Endpoint (Ultra-Robust Version)
+# 2. The /stats Endpoint
 @app.get("/stats")
 async def get_stats(values: str = Query(default="")):
     try:
